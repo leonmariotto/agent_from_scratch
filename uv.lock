@@ -8,6 +8,67 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "agent-from-scratch"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "click" },
+    { name = "datasets" },
+    { name = "docker" },
+    { name = "fastapi" },
+    { name = "litellm" },
+    { name = "loguru" },
+    { name = "pydantic" },
+    { name = "pyright" },
+    { name = "requests" },
+    { name = "ruff" },
+    { name = "strictyaml" },
+    { name = "textual" },
+    { name = "uvicorn" },
+]
+
+[package.dev-dependencies]
+build = [
+    { name = "pyright" },
+    { name = "ruff" },
+]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-dependency" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click" },
+    { name = "datasets" },
+    { name = "docker" },
+    { name = "fastapi" },
+    { name = "litellm", specifier = ">=1.90.2" },
+    { name = "loguru" },
+    { name = "pydantic" },
+    { name = "pyright" },
+    { name = "requests" },
+    { name = "ruff" },
+    { name = "strictyaml" },
+    { name = "textual", specifier = ">=8.2.7" },
+    { name = "uvicorn" },
+]
+
+[package.metadata.requires-dev]
+build = [
+    { name = "pyright" },
+    { name = "ruff" },
+]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-dependency" },
+]
+
+[[package]]
 name = "aiohappyeyeballs"
 version = "2.7.1"
 source = { registry = "https://pypi.org/simple" }
@@ -512,67 +573,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/19/74/a633ee74eb36c44aa6d1095e7cc5569bebf04342ee146178e2d36600708b/jsonschema_specifications-2025.9.1.tar.gz", hash = "sha256:b540987f239e745613c7a9176f3edb72b832a4ac465cf02712288397832b5e8d", size = 32855, upload-time = "2025-09-08T01:34:59.186Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/41/45/1a4ed80516f02155c51f51e8cedb3c1902296743db0bbc66608a0db2814f/jsonschema_specifications-2025.9.1-py3-none-any.whl", hash = "sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe", size = 18437, upload-time = "2025-09-08T01:34:57.871Z" },
-]
-
-[[package]]
-name = "lagents"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "click" },
-    { name = "datasets" },
-    { name = "docker" },
-    { name = "fastapi" },
-    { name = "litellm" },
-    { name = "loguru" },
-    { name = "pydantic" },
-    { name = "pyright" },
-    { name = "requests" },
-    { name = "ruff" },
-    { name = "strictyaml" },
-    { name = "textual" },
-    { name = "uvicorn" },
-]
-
-[package.dev-dependencies]
-build = [
-    { name = "pyright" },
-    { name = "ruff" },
-]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-dependency" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click" },
-    { name = "datasets" },
-    { name = "docker" },
-    { name = "fastapi" },
-    { name = "litellm", specifier = ">=1.90.2" },
-    { name = "loguru" },
-    { name = "pydantic" },
-    { name = "pyright" },
-    { name = "requests" },
-    { name = "ruff" },
-    { name = "strictyaml" },
-    { name = "textual", specifier = ">=8.2.7" },
-    { name = "uvicorn" },
-]
-
-[package.metadata.requires-dev]
-build = [
-    { name = "pyright" },
-    { name = "ruff" },
-]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-dependency" },
 ]
 
 [[package]]

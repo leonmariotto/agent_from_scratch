@@ -1,5 +1,5 @@
 [project]
-name = "Lagents"
+name = "agent_from_scratch"
 version = "0.1.0"
 description = "Leon's agents."
 readme = "README.md"
@@ -46,7 +46,7 @@ exclude = ["tests"]
 
 [tool.pytest.ini_options]
 addopts = [
-    "--cov=Lagents",
+    "--cov=agent_from_scratch",
     "-s",
     "--log-cli-level=INFO"
 ]
@@ -55,4 +55,4 @@ markers = [
 ]
 
 [tool.setuptools]
-packages = ["Lagents"]
+packages = ["agent_from_scratch"]

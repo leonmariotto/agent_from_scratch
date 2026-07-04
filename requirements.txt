@@ -90,8 +90,8 @@ click==8.4.2 \
     --hash=sha256:9a6cea6e60b17ebe0a44c5cc636d94f09bd66142c1cd7d8b4cd731c4917a15f6 \
     --hash=sha256:e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76
     # via
+    #   agent-from-scratch
     #   huggingface-hub
-    #   lagents
     #   litellm
     #   uvicorn
 colorama==0.4.6 ; sys_platform == 'win32' \
@@ -124,7 +124,7 @@ coverage==7.15.0 \
 datasets==5.0.0 \
     --hash=sha256:7dd34927a0fd7046e98aad5cb9430e699c373238a15befa7b9bf22b991a7fee6 \
     --hash=sha256:83dbbbdb07a33b82192b8c419deb18739b138ee2ce1a322d55ce6b100954ec1a
-    # via lagents
+    # via agent-from-scratch
 dill==0.4.1 \
     --hash=sha256:1e1ce33e978ae97fcfcff5638477032b801c46c7c65cf717f95fbc2248f79a9d \
     --hash=sha256:423092df4182177d4d8ba8290c8a5b640c66ab35ec7da59ccfa00f6fa3eea5fa
@@ -138,11 +138,11 @@ distro==1.9.0 \
 docker==7.1.0 \
     --hash=sha256:ad8c70e6e3f8926cb8a92619b832b4ea5299e2831c14284663184e200546fa6c \
     --hash=sha256:c96b93b7f0a746f9e77d325bcfb87422a3d8bd4f03136ae8a85b37f1898d5fc0
-    # via lagents
+    # via agent-from-scratch
 fastapi==0.139.0 \
     --hash=sha256:99ab7b2d92223c76d6cf10757ab3f89d45b38267fc20b2a136cf02f6beac3145 \
     --hash=sha256:cf15e1e9e667ddb0ad63811e60bd11390d1aac838ca4a7a23f421807b2308189
-    # via lagents
+    # via agent-from-scratch
 fastuuid==0.14.0 \
     --hash=sha256:09098762aad4f8da3a888eb9ae01c84430c907a297b97166b8abc07b640f2995 \
     --hash=sha256:0df14e92e7ad3276327631c9e7cec09e32572ce82089c55cb1bb8df71cf394ed \
@@ -302,11 +302,11 @@ linkify-it-py==2.1.0 \
 litellm==1.90.3 \
     --hash=sha256:0ba6844865c0637719b3e76f43cf1089e3bd578a456b7be6a7f64afbbc259472 \
     --hash=sha256:1b15776011745ea4f90259d9bd2f269835a8541cd7948751bec726b1d21647fa
-    # via lagents
+    # via agent-from-scratch
 loguru==0.7.3 \
     --hash=sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6 \
     --hash=sha256:31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c
-    # via lagents
+    # via agent-from-scratch
 markdown-it-py==4.2.0 \
     --hash=sha256:04a21681d6fbb623de53f6f364d352309d4094dd4194040a10fd51833e418d49 \
     --hash=sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a
@@ -517,8 +517,8 @@ pydantic==2.13.4 \
     --hash=sha256:45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba \
     --hash=sha256:c40756b57adaa8b1efeeced5c196f3f3b7c435f90e84ea7f443901bec8099ef6
     # via
+    #   agent-from-scratch
     #   fastapi
-    #   lagents
     #   litellm
     #   openai
 pydantic-core==2.46.4 \
@@ -549,7 +549,7 @@ pygments==2.20.0 \
 pyright==1.1.411 \
     --hash=sha256:d885a0551f2e763b089a02702174e7f4ba77548cddabc972ab86d1f7f1b0f998 \
     --hash=sha256:dc7c72a8e2700c55baa127554040e067041ea53ccfd50bf96308cc4291c7d5d9
-    # via lagents
+    # via agent-from-scratch
 pytest==9.1.1 \
     --hash=sha256:1088fbde8f2b49d95a549a195707afa7a76a3ce9bcadc26b6d71f0ffda5fe313 \
     --hash=sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c
@@ -636,9 +636,9 @@ requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
     --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
     # via
+    #   agent-from-scratch
     #   datasets
     #   docker
-    #   lagents
     #   tiktoken
 rich==15.0.0 \
     --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb \
@@ -683,7 +683,7 @@ ruff==0.15.20 \
     --hash=sha256:e89f198a1ea6ef0d727c1cf16088bc91a6cb0ab947dedc966715691647186eae \
     --hash=sha256:ed65ef510e43a137207e0f01cfcf998aeddb1aeeda5c9d35023e910284d7cf21 \
     --hash=sha256:f701305e66b38ea6c91882490eb73459796808e4c6362a1b765255e0cdcd4053
-    # via lagents
+    # via agent-from-scratch
 setuptools==82.0.1 \
     --hash=sha256:7d872682c5d01cfde07da7bccc7b65469d3dca203318515ada1de5eda35efbf9 \
     --hash=sha256:a59e362652f08dcd477c78bb6e7bd9d80a7995bc73ce773050228a348ce2e5bb
@@ -703,11 +703,11 @@ starlette==1.3.1 \
 strictyaml==1.7.3 \
     --hash=sha256:22f854a5fcab42b5ddba8030a0e4be51ca89af0267961c8d6cfa86395586c407 \
     --hash=sha256:fb5c8a4edb43bebb765959e420f9b3978d7f1af88c80606c03fb420888f5d1c7
-    # via lagents
+    # via agent-from-scratch
 textual==8.2.8 \
     --hash=sha256:267375fd402dc8d981457212efa71f0e3365fd17bba144ba9bb3ed7563cb374a \
     --hash=sha256:3f106a9fbc73e39dd266c9712432087de78a6d644084c7c241d6a25c3169115b
-    # via lagents
+    # via agent-from-scratch
 tiktoken==0.13.0 \
     --hash=sha256:125bc05005e747f993a83dc67934249932d6e4209854452cd4c0b1d53fba3ba2 \
     --hash=sha256:165cf1820ea4a354985c2490a5205d4cc74661c934aca79dd0368232fff94e0f \
@@ -786,7 +786,7 @@ urllib3==2.7.0 \
 uvicorn==0.50.0 \
     --hash=sha256:05f0eb19edf38208f79f43df8a63081b48df31b0cd1e5997be957a4dc97d1b19 \
     --hash=sha256:0c92e1bc2259cb7faa4fcef774a5966588f2e88542744550b66799fba10b76f1
-    # via lagents
+    # via agent-from-scratch
 win32-setctime==1.2.0 ; sys_platform == 'win32' \
     --hash=sha256:95d644c4e708aba81dc3704a116d8cbc974d70b3bdb8be1d150e36be6e9d1390 \
     --hash=sha256:ae1fdf948f5640aae05c511ade119313fb6a30d7eabe25fef9764dca5873c4c0
