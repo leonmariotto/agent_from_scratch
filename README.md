@@ -29,6 +29,16 @@ and `api_key`. Without `base_url`, native LiteLLM model identifiers such as
 `anthropic/<model>` are passed through unchanged. Provider-specific request
 fields can be supplied with `extra_body`.
 
+## Wishlist
+
+- Skill tool: load skills through a dedicated tool
+- Shell tool
+- File access tool: line oriented (file_line_delete, file_line_read, file_line_insert, etc).
+- Support for MCP tool.
+- Use Hister for indexed documentation
+- Async model call and tool execution.
+- Tool to analyze trace, push metrics to a VictoriaMetrics / Graphana instance to see improvements.
+
 ## Development note.
 
 ### Context management
