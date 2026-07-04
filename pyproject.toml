@@ -18,14 +18,15 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "litellm>=1.90.2",
+    "pyyaml>=6.0",
 ]
 
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
-#[project.scripts]
-#coder = "LLLM.coder:coder_cli"
+[project.scripts]
+evaluate_gaia = "agent_from_scratch.eval_gaia:main"
 # 
 # [tool.uv]
 # package = true

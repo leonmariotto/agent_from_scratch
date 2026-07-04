@@ -1,0 +1,36 @@
+evaluation:
+  name: gaia-local-smoke
+model:
+  model: lllm
+  base_url: http://127.0.0.1:8000/v1
+  max_tokens: 4096
+  temperature: 0.6
+  top_p: 0.95
+  top_k: 20
+agent:
+  mode: dummy
+  instruction: Use compute or Python when calculation or file inspection is needed.
+  max_steps: 8
+  prompt_template: |
+    Answer this GAIA benchmark question. Return only FINAL ANSWER: <answer>.
+    Question: {question}
+    {attachment}
+tools:
+  enabled:
+    - compute
+    - python
+container:
+  image: python:3.13-slim
+  network: false
+  auto_remove: true
+dataset:
+  split: validation
+  level: 1
+  tool_filter:
+    - calculator
+    - calculator (or ability to count)
+    - python
+  shuffle: false
+  shuffle_seed: 0
+  entry_offset: 1
+  entry_count: 1

@@ -5,10 +5,16 @@ import json
 from pathlib import Path
 from typing import Any
 
+from click.testing import CliRunner
 import pytest
 
 from agent_from_scratch import eval_gaia
-from agent_from_scratch.agent_context import AgentResult, Event, ExecutionContext, Message
+from agent_from_scratch.agent_context import (
+    AgentResult,
+    Event,
+    ExecutionContext,
+    Message,
+)
 from agent_from_scratch.eval_gaia import (
     GaiaTask,
     evaluate_gaia_agent,
@@ -80,6 +86,26 @@ def _patch_dataset(
 
     monkeypatch.setattr(eval_gaia, "load_dataset", fake_load_dataset)
     return calls
+
+
+def _application_config(
+    tmp_path: Path,
+    **dataset: object,
+) -> eval_gaia.AppConfig:
+    values: dict[str, object] = {
+        "split": "validation",
+        "entry_count": 1,
+        "data_dir": tmp_path,
+    }
+    values.update(dataset)
+    return eval_gaia.AppConfig.model_validate(
+        {
+            "model": {"model": "test", "base_url": "http://localhost:8000/v1"},
+            "agent": {"prompt_template": "Question: {question}\n{attachment}"},
+            "tools": {"enabled": ["compute", "python"]},
+            "dataset": values,
+        }
+    )
 
 
 def test_load_gaia_tasks_selects_all_config_and_resolves_file_path(
@@ -163,6 +189,20 @@ def test_load_gaia_tasks_applies_limit(
     tasks = load_gaia_tasks(data_dir=tmp_path, limit=1)
 
     assert [task.task_id for task in tasks] == ["task-1"]
+
+
+def test_load_gaia_tasks_applies_offset_before_limit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _patch_dataset(
+        monkeypatch,
+        [_row("task-1"), _row("task-2"), _row("task-3")],
+    )
+
+    tasks = load_gaia_tasks(data_dir=tmp_path, offset=1, limit=1)
+
+    assert [task.task_id for task in tasks] == ["task-2"]
 
 
 def test_load_gaia_tasks_can_shuffle_before_limit(
@@ -371,7 +411,9 @@ def test_evaluate_gaia_agent_writes_full_jsonl_results(
     _patch_dataset(monkeypatch, [_row("task-1", final_answer="Paris")])
     output_path = tmp_path / "results.jsonl"
 
-    evaluate_gaia_agent(lambda task: "Paris", data_dir=tmp_path, output_path=output_path)
+    evaluate_gaia_agent(
+        lambda task: "Paris", data_dir=tmp_path, output_path=output_path
+    )
 
     rows = [json.loads(line) for line in output_path.read_text().splitlines()]
     assert rows[0]["task_id"] == "task-1"
@@ -470,3 +512,172 @@ def test_score_gaia_answer_accepts_exact_and_contained_answers() -> None:
     assert score_gaia_answer("paris", "Paris")
     assert score_gaia_answer("The answer is Paris.", "Paris")
     assert not score_gaia_answer("London", "Paris")
+
+
+def test_application_config_help_model_and_tools(tmp_path: Path) -> None:
+    config_path = tmp_path / "configs" / "evaluation.yaml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        "model:\n  model: test\ndataset:\n  entry_count: 1\n  data_dir: ../data\n",
+        encoding="utf-8",
+    )
+    config = eval_gaia.load_config(config_path)
+    assert config.dataset.data_dir == (tmp_path / "data").resolve()
+    with pytest.raises(ValueError, match="extra_forbidden"):
+        eval_gaia.AppConfig.model_validate(
+            {
+                "model": {"model": "test", "surprise": True},
+                "dataset": {"entry_count": 1},
+            }
+        )
+    with pytest.raises(ValueError, match=r"must contain \{question\}"):
+        eval_gaia.AgentConfig(prompt_template="No task")
+
+    help_result = CliRunner().invoke(eval_gaia.main, ["--help"])
+    normalized_help = " ".join(help_result.output.split())
+    assert help_result.exit_code == 0
+    assert "selection order" in normalized_help
+    assert "LLLM_API_KEY" in normalized_help
+    assert "compute and python" in normalized_help
+    assert "checkpointed after every completed entry" in normalized_help
+
+    llm = eval_gaia.build_llm(
+        eval_gaia.ModelConfig(
+            model="local",
+            base_url="http://localhost/v1",
+            max_tokens=17,
+            top_k=4,
+            enable_thinking=False,
+        ),
+        "environment-secret",
+    )
+    assert llm.api_key == "environment-secret"
+    assert llm.max_tokens == 17
+    tools = eval_gaia.build_tools(eval_gaia.ToolsConfig(enabled=["python", "compute"]))
+    assert [tool.schema["function"]["name"] for tool in tools] == [
+        "python",
+        "compute",
+    ]
+
+
+def test_application_invalid_configuration_is_a_usage_error(tmp_path: Path) -> None:
+    source = tmp_path / "bad.yaml"
+    source.write_text("model:\n  model: test\nunknown: true\n", encoding="utf-8")
+    result = CliRunner().invoke(
+        eval_gaia.main,
+        ["--config", str(source), "--trace", str(tmp_path / "trace.json")],
+    )
+    assert result.exit_code == 2
+    assert "invalid configuration" in result.output
+    assert "unknown" in result.output
+
+
+def test_application_container_attachment_trace_and_checkpointing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    attachment = tmp_path / "attachments" / "table.csv"
+    attachment.parent.mkdir()
+    attachment.write_text("x\n1\n", encoding="utf-8")
+    task = GaiaTask(
+        "task-1",
+        "Read it",
+        1,
+        attachment,
+        "table.csv",
+        {"Tools": "python"},
+        "1",
+    )
+    monkeypatch.setattr(eval_gaia, "load_gaia_tasks", lambda **kwargs: [task])
+    prompts: list[str] = []
+
+    class FakeAgent:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def run(self, prompt: str, **kwargs: object) -> AgentResult:
+            prompts.append(prompt)
+            context = ExecutionContext()
+            context.add_user_message(prompt)
+            return AgentResult(output="1", context=context)
+
+    containers: list[Any] = []
+
+    class FakeContainer:
+        def __init__(self, **kwargs: object) -> None:
+            self.started: tuple[list[Path], bool] | None = None
+            self.closed = False
+            containers.append(self)
+
+        def start(self, mounts: list[Path], network: bool = False) -> None:
+            self.started = (mounts, network)
+
+        def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(eval_gaia, "Agent", FakeAgent)
+    monkeypatch.setattr(eval_gaia, "ContainerEnv", FakeContainer)
+    monkeypatch.setenv("LLLM_API_KEY", "do-not-write-me")
+    writes = 0
+    real_write = eval_gaia._atomic_write_json
+
+    def counting_write(path: Path, document: dict[str, object]) -> None:
+        nonlocal writes
+        writes += 1
+        real_write(path, document)
+
+    monkeypatch.setattr(eval_gaia, "_atomic_write_json", counting_write)
+    trace_path = tmp_path / "missing" / "trace.json"
+    evaluation = eval_gaia.run_evaluation(
+        _application_config(tmp_path),
+        trace_path,
+    )
+
+    assert evaluation.correct_tasks == 1
+    assert containers[0].started == ([attachment.parent], False)
+    assert containers[0].closed is True
+    assert "/tmp/0/table.csv" in prompts[0]
+    assert str(attachment) not in prompts[0]
+    assert writes == 2
+    trace_text = trace_path.read_text(encoding="utf-8")
+    trace = json.loads(trace_text)
+    assert "do-not-write-me" not in trace_text
+    assert trace["configuration"]["credential"]["source"] == "LLLM_API_KEY"
+    assert trace["run"]["selected_task_ids"] == ["task-1"]
+    assert trace["entries"][0]["agent"]["context"] is not None
+
+
+def test_application_container_closes_when_agent_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    task = GaiaTask("task-1", "Q", 1, None, None, {}, "A")
+    monkeypatch.setattr(eval_gaia, "load_gaia_tasks", lambda **kwargs: [task])
+
+    class FakeAgent:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def run(self, prompt: str, **kwargs: object) -> AgentResult:
+            raise RuntimeError("model failed")
+
+    closed: list[bool] = []
+
+    class FakeContainer:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def start(self, mounts: list[Path], network: bool = False) -> None:
+            pass
+
+        def close(self) -> None:
+            closed.append(True)
+
+    monkeypatch.setattr(eval_gaia, "Agent", FakeAgent)
+    monkeypatch.setattr(eval_gaia, "ContainerEnv", FakeContainer)
+    result = eval_gaia.run_evaluation(
+        _application_config(tmp_path),
+        tmp_path / "trace.json",
+    )
+    assert closed == [True]
+    assert result.results[0].error == "RuntimeError: model failed"

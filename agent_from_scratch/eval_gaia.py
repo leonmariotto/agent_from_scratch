@@ -14,18 +14,40 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
+from datetime import datetime, timezone
+from hashlib import sha256
 import importlib
 import json
+import os
 from pathlib import Path
 import random
 import re
+import string
+import tempfile
 import time
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
+import click
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    NonNegativeInt,
+    PositiveInt,
+    ValidationError,
+    field_validator,
+)
 
+from .agent import Agent, AgentMode
+from .agent_llm import LlmClient
 from .agent_context import AgentResult, ExecutionContext
+from .container_env import ContainerEnv, DEFAULT_CONTAINER_ENV_IMAGE
+from .tool_common import Tool
+from .tool_compute import compute_tool
+from .tool_python import python_tool
+from .yaml_parser import YamlParser, YamlParserError
 
 load_dataset = cast(
     Callable[..., Any], importlib.import_module("datasets").load_dataset
@@ -119,6 +141,7 @@ def load_gaia_tasks(
     split: GaiaSplit = "validation",
     level: GaiaLevel | None = None,
     limit: int | None = None,
+    offset: int = 0,
     data_dir: str | Path | None = None,
     allowed_tools: Sequence[GaiaToolName] | None = None,
     shuffle: bool = False,
@@ -132,6 +155,7 @@ def load_gaia_tasks(
             ``"test"`` for leaderboard-style prediction export.
         level: Optional GAIA level filter.  ``None`` loads all levels.
         limit: Optional maximum number of rows to return.
+        offset: Number of eligible rows to skip after filtering and shuffling.
         data_dir: Optional local GAIA snapshot path.  When omitted, the dataset
             is resolved with ``huggingface_hub.snapshot_download``.
         allowed_tools: Optional normalized tool names.  When provided, only
@@ -146,6 +170,8 @@ def load_gaia_tasks(
     """
     if limit is not None and limit < 0:
         raise ValueError("limit must be non-negative")
+    if offset < 0:
+        raise ValueError("offset must be non-negative")
 
     config_name = _gaia_config_name(level)
     root = _resolve_gaia_data_dir(data_dir)
@@ -161,6 +187,8 @@ def load_gaia_tasks(
         rows = _filter_rows_by_allowed_tools(rows, allowed_tools)
     if shuffle:
         random.Random(shuffle_seed).shuffle(rows)
+    if offset:
+        rows = rows[offset:]
     if limit is not None:
         rows = rows[:limit]
 
@@ -175,6 +203,7 @@ def evaluate_gaia_agent(
     split: GaiaSplit = "validation",
     level: GaiaLevel | None = None,
     limit: int | None = None,
+    offset: int = 0,
     data_dir: str | Path | None = None,
     output_path: str | Path | None = None,
     trace_output_path: str | Path | None = None,
@@ -198,6 +227,7 @@ def evaluate_gaia_agent(
         split=split,
         level=level,
         limit=limit,
+        offset=offset,
         data_dir=data_dir,
         allowed_tools=allowed_tools,
         shuffle=shuffle,
@@ -290,6 +320,7 @@ def evaluate_gaia_agent(
                 "split": split,
                 "level": level,
                 "limit": limit,
+                "offset": offset,
                 "data_dir": str(data_dir) if data_dir is not None else None,
                 "allowed_tools": list(allowed_tools or []),
                 "shuffle": shuffle,
@@ -502,6 +533,15 @@ def _score_prediction(
     return score_gaia_answer(prediction, expected_answer)
 
 
+def score_prediction(
+    prediction: str,
+    expected_answer: str | None,
+    error: str | None,
+) -> bool | None:
+    """Score a prediction while accounting for hidden answers and task errors."""
+    return _score_prediction(prediction, expected_answer, error)
+
+
 def _coerce_agent_output(
     agent_output: GaiaAgentOutput,
 ) -> tuple[str, ExecutionContext | None, str | None]:
@@ -513,6 +553,7 @@ def _coerce_agent_output(
 
 
 def _build_evaluation_result(results: list[GaiaResult]) -> GaiaEvaluationResult:
+    """Build aggregate metrics for a set of GAIA row results."""
     scored = [result for result in results if result.correct is not None]
     correct_count = sum(1 for result in scored if result.correct)
     per_level_accuracy: dict[int, float] = {}
@@ -599,6 +640,22 @@ def _trace_entry_to_json(
     }
 
 
+def trace_entry_to_json(
+    task: GaiaTask,
+    result: GaiaResult,
+    *,
+    agent_context: ExecutionContext | None,
+    agent_status: str | None,
+) -> dict[str, object]:
+    """Serialize one task, result, and complete agent context for a trace."""
+    return _trace_entry_to_json(
+        task,
+        result,
+        agent_context=agent_context,
+        agent_status=agent_status,
+    )
+
+
 def _execution_context_to_json(context: ExecutionContext) -> dict[str, object]:
     return cast(dict[str, object], _json_safe(context))
 
@@ -622,3 +679,471 @@ def _json_safe(value: object) -> object:
         value = cast(Sequence[Any], value)
         return [_json_safe(item) for item in value]
     return str(value)
+
+
+DEFAULT_PROMPT_TEMPLATE = """Answer this GAIA benchmark question.
+Use the available tools when useful. Return only the final answer in the form:
+FINAL ANSWER: <answer>
+
+Question: {question}
+{attachment}"""
+
+
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class EvaluationConfig(StrictModel):
+    """Reserved run-level settings."""
+
+    name: str = "gaia"
+
+
+class ModelConfig(StrictModel):
+    model: str
+    base_url: str | None = None
+    max_tokens: PositiveInt = 1024
+    temperature: Annotated[float, Field(ge=0.0)] = 0.0
+    top_p: Annotated[float, Field(gt=0.0, le=1.0)] | None = None
+    top_k: PositiveInt | None = None
+    enable_thinking: bool | None = None
+    extra_body: dict[str, object] = Field(default_factory=dict)
+    timeout: Annotated[float, Field(gt=0.0)] = 3600.0
+
+    @field_validator("model")
+    @classmethod
+    def model_not_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be empty")
+        return value
+
+
+class AgentConfig(StrictModel):
+    mode: AgentMode = "dummy"
+    instruction: str = ""
+    max_steps: NonNegativeInt = Field(
+        default=8,
+        validation_alias=AliasChoices("max_steps", "maximum_steps"),
+    )
+    prompt_template: str = DEFAULT_PROMPT_TEMPLATE
+
+    @field_validator("prompt_template")
+    @classmethod
+    def valid_prompt_template(cls, value: str) -> str:
+        allowed = {
+            "question",
+            "attachment",
+            "attachment_path",
+            "file_name",
+            "task_id",
+            "level",
+        }
+        template_fields: set[str] = set()
+        try:
+            for _, field_name, format_spec, conversion in string.Formatter().parse(
+                value
+            ):
+                if field_name is None:
+                    continue
+                if field_name not in allowed:
+                    raise ValueError(
+                        f"unknown placeholder {{{field_name}}}; "
+                        f"supported placeholders: {', '.join(sorted(allowed))}"
+                    )
+                if format_spec or conversion:
+                    raise ValueError(
+                        "format specifications and conversions are unsupported"
+                    )
+                template_fields.add(field_name)
+        except ValueError as error:
+            raise ValueError(f"invalid prompt template: {error}") from error
+        if "question" not in template_fields:
+            raise ValueError("prompt template must contain {question}")
+        return value
+
+
+RuntimeToolName = Literal["compute", "python"]
+
+
+class ToolsConfig(StrictModel):
+    enabled: list[RuntimeToolName] = Field(
+        default_factory=lambda: cast(list[RuntimeToolName], [])
+    )
+
+    @field_validator("enabled")
+    @classmethod
+    def unique_tools(cls, value: list[RuntimeToolName]) -> list[RuntimeToolName]:
+        if len(value) != len(set(value)):
+            raise ValueError("tool names must be unique")
+        return value
+
+
+class ContainerConfig(StrictModel):
+    image: str = DEFAULT_CONTAINER_ENV_IMAGE
+    network: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("network", "network_access"),
+    )
+    auto_remove: bool = True
+
+    @field_validator("image")
+    @classmethod
+    def image_not_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be empty")
+        return value
+
+
+class DatasetConfig(StrictModel):
+    split: Literal["validation", "test"] = "validation"
+    entry_count: PositiveInt
+    entry_offset: NonNegativeInt = 0
+    tool_filter: list[GaiaToolName] | None = None
+    level: GaiaLevel | None = None
+    data_dir: Path | None = None
+    shuffle: bool = False
+    shuffle_seed: int = 0
+
+    @field_validator("data_dir", mode="before")
+    @classmethod
+    def path_from_yaml(cls, value: object) -> object:
+        if isinstance(value, str):
+            return Path(value)
+        return value
+
+
+class AppConfig(StrictModel):
+    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
+    model: ModelConfig
+    agent: AgentConfig = Field(default_factory=AgentConfig)
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    container: ContainerConfig = Field(default_factory=ContainerConfig)
+    dataset: DatasetConfig
+
+    @field_validator("tools", mode="before")
+    @classmethod
+    def normalize_tools(cls, value: object) -> object:
+        if isinstance(value, list):
+            return {"enabled": cast(list[object], value)}
+        return value
+
+
+TOOL_REGISTRY: Mapping[RuntimeToolName, Callable[[], Tool]] = {
+    "compute": compute_tool,
+    "python": python_tool,
+}
+
+
+def load_config(path: Path) -> AppConfig:
+    """Parse, validate, and resolve a configuration file."""
+    raw = YamlParser().parse(path)
+    config = AppConfig.model_validate(raw)
+    if config.dataset.data_dir is not None:
+        resolved = (path.resolve().parent / config.dataset.data_dir).resolve()
+        config = config.model_copy(
+            update={"dataset": config.dataset.model_copy(update={"data_dir": resolved})}
+        )
+    return config
+
+
+def build_tools(config: ToolsConfig) -> list[Tool]:
+    """Build tools in the configured order."""
+    return [TOOL_REGISTRY[name]() for name in config.enabled]
+
+
+def build_llm(config: ModelConfig, api_key: str | None) -> LlmClient:
+    """Build the configured LiteLLM client."""
+    return LlmClient(
+        config.model,
+        base_url=config.base_url,
+        api_key=api_key,
+        max_tokens=config.max_tokens,
+        temperature=config.temperature,
+        top_p=config.top_p,
+        top_k=config.top_k,
+        enable_thinking=config.enable_thinking,
+        extra_body=config.extra_body,
+        timeout=config.timeout,
+    )
+
+
+def _prompt_for_task(template: str, task: GaiaTask, attachment_path: str | None) -> str:
+    attachment = (
+        f"Attached file path: {attachment_path}" if attachment_path is not None else ""
+    )
+    return template.format(
+        question=task.question,
+        attachment=attachment,
+        attachment_path=attachment_path or "",
+        file_name=task.file_name or "",
+        task_id=task.task_id,
+        level=task.level,
+    )
+
+
+def _container_attachment(task: GaiaTask) -> tuple[list[Path], str | None]:
+    if task.file_path is None:
+        return [], None
+    return [task.file_path.parent], f"/tmp/0/{task.file_path.name}"
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _resolved_config(config: AppConfig) -> dict[str, object]:
+    return cast(dict[str, object], config.model_dump(mode="json"))
+
+
+def _config_hash(config: Mapping[str, object]) -> str:
+    canonical = json.dumps(config, sort_keys=True, separators=(",", ":"))
+    return sha256(canonical.encode()).hexdigest()
+
+
+def _atomic_write_json(path: Path, document: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temp_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(document, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+    except BaseException:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _trace_document(
+    *,
+    resolved: Mapping[str, object],
+    run: Mapping[str, object],
+    entries: Sequence[Mapping[str, object]],
+    evaluation: GaiaEvaluationResult,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "configuration": {
+            "resolved": dict(resolved),
+            "sha256": _config_hash(resolved),
+            "credential": {
+                "source": "LLLM_API_KEY",
+                "present": bool(os.environ.get("LLLM_API_KEY")),
+            },
+        },
+        "run": dict(run),
+        "summary": {
+            "total_tasks": evaluation.total_tasks,
+            "scored_tasks": evaluation.scored_tasks,
+            "correct_tasks": evaluation.correct_tasks,
+            "overall_accuracy": evaluation.overall_accuracy,
+            "per_level_accuracy": evaluation.per_level_accuracy,
+        },
+        "entries": list(entries),
+    }
+
+
+def run_evaluation(config: AppConfig, trace_path: Path) -> GaiaEvaluationResult:
+    """Execute a configured run and checkpoint its trace after each task."""
+    resolved = _resolved_config(config)
+    llm = build_llm(config.model, os.environ.get("LLLM_API_KEY") or None)
+    agent = Agent(
+        llm,
+        build_tools(config.tools),
+        instruction=config.agent.instruction,
+        max_step=config.agent.max_steps,
+        agent_mode=config.agent.mode,
+    )
+    dataset = config.dataset
+    tasks = load_gaia_tasks(
+        split=dataset.split,
+        level=dataset.level,
+        limit=dataset.entry_count,
+        offset=dataset.entry_offset,
+        data_dir=dataset.data_dir,
+        allowed_tools=dataset.tool_filter,
+        shuffle=dataset.shuffle,
+        shuffle_seed=dataset.shuffle_seed,
+    )
+    run: dict[str, object] = {
+        "dataset_id": GAIA_DATASET_ID,
+        "started_at": _now(),
+        "finished_at": None,
+        "selected_task_ids": [task.task_id for task in tasks],
+    }
+    results: list[GaiaResult] = []
+    entries: list[dict[str, object]] = []
+
+    for task in tasks:
+        started = time.perf_counter()
+        prediction = ""
+        error: str | None = None
+        context: ExecutionContext | None = None
+        status: str | None = None
+        container: ContainerEnv | None = None
+        try:
+            mounts, attachment_path = _container_attachment(task)
+            if "python" in config.tools.enabled:
+                container = ContainerEnv(
+                    image=config.container.image,
+                    auto_remove=config.container.auto_remove,
+                )
+                container.start(mounts, network=config.container.network)
+            prompt = _prompt_for_task(
+                config.agent.prompt_template, task, attachment_path
+            )
+            output = agent.run(prompt, container_env=container, trace_enabled=True)
+            prediction = (
+                output.output if isinstance(output.output, str) else str(output.output)
+            )
+            context = output.context
+            status = output.status
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            status = "error"
+        finally:
+            if container is not None:
+                try:
+                    container.close()
+                except Exception as exc:
+                    close_error = f"{type(exc).__name__}: {exc}"
+                    error = (
+                        f"{error}; container close failed: {close_error}"
+                        if error is not None
+                        else f"container close failed: {close_error}"
+                    )
+                    status = "error"
+        elapsed = time.perf_counter() - started
+        result = GaiaResult(
+            task_id=task.task_id,
+            question=task.question,
+            level=task.level,
+            file_path=task.file_path,
+            file_name=task.file_name,
+            prediction=prediction,
+            expected_answer=task.expected_answer,
+            correct=score_prediction(prediction, task.expected_answer, error),
+            elapsed_seconds=elapsed,
+            error=error,
+        )
+        results.append(result)
+        entries.append(
+            trace_entry_to_json(
+                task, result, agent_context=context, agent_status=status
+            )
+        )
+        partial = _build_evaluation_result(results)
+        _atomic_write_json(
+            trace_path,
+            _trace_document(
+                resolved=resolved,
+                run=run,
+                entries=entries,
+                evaluation=partial,
+            ),
+        )
+
+    evaluation = _build_evaluation_result(results)
+    run["finished_at"] = _now()
+    _atomic_write_json(
+        trace_path,
+        _trace_document(
+            resolved=resolved,
+            run=run,
+            entries=entries,
+            evaluation=evaluation,
+        ),
+    )
+    return evaluation
+
+
+HELP = """Run a real GAIA evaluation from a strict YAML configuration.
+
+The YAML sections are evaluation, model, agent, tools, container, and dataset.
+Dataset selection order is split/level, tool_filter, seeded shuffle, entry_offset,
+then entry_count. Runtime tools currently supported are compute and python. Python
+starts a fresh container per entry. Custom endpoint credentials are read only from
+LLLM_API_KEY.
+
+TRACE is overwritten atomically, its parent directories are created, and it is
+checkpointed after every completed entry. No other result file is produced.
+
+Example:
+
+\b
+  evaluation:
+    name: gaia-smoke
+  model:
+    model: lllm
+    base_url: http://127.0.0.1:8000/v1
+    max_tokens: 1024
+  agent:
+    mode: dummy
+    max_steps: 8
+    prompt_template: |
+      Answer the question and return FINAL ANSWER: <answer>.
+      Question: {question}
+      {attachment}
+  tools:
+    enabled: [compute, python]
+  container:
+    image: python:3.13-slim
+    network: false
+    auto_remove: true
+  dataset:
+    split: validation
+    level: 1
+    data_dir: ./gaia
+    tool_filter: [calculator, python]
+    shuffle: false
+    shuffle_seed: 0
+    entry_offset: 0
+    entry_count: 1
+"""
+
+
+@click.command(
+    "evaluate_gaia",
+    context_settings={"help_option_names": ["-h", "--help"]},
+    help=HELP,
+)
+@click.option(
+    "-c",
+    "--config",
+    "config_path",
+    required=True,
+    type=click.Path(path_type=Path, dir_okay=False, readable=True),
+    help="YAML evaluation configuration.",
+)
+@click.option(
+    "-t",
+    "--trace",
+    "trace_path",
+    required=True,
+    type=click.Path(path_type=Path, dir_okay=False),
+    help="JSON trace destination (overwritten).",
+)
+def main(config_path: Path, trace_path: Path) -> None:
+    """Run the configuration-driven GAIA evaluation CLI."""
+    try:
+        config = load_config(config_path)
+    except (YamlParserError, ValidationError, ValueError) as error:
+        raise click.UsageError(f"invalid configuration: {error}") from error
+    try:
+        evaluation = run_evaluation(config, trace_path)
+    except Exception as error:
+        raise click.ClickException(f"evaluation failed: {error}") from error
+    click.echo(
+        f"Completed {evaluation.total_tasks} tasks; "
+        f"correct={evaluation.correct_tasks}/{evaluation.scored_tasks}"
+    )
+
+
+if __name__ == "__main__":
+    main()

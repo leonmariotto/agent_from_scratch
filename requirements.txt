@@ -589,6 +589,7 @@ pyyaml==6.0.3 \
     --hash=sha256:ee2922902c45ae8ccada2c5b501ab86c36525b883eff4255313a253a3160861c \
     --hash=sha256:f7057c9a337546edc7973c0d3ba84ddcdf0daa14533c2065749c9075001090e6
     # via
+    #   agent-from-scratch
     #   datasets
     #   huggingface-hub
 referencing==0.37.0 \
