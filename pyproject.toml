@@ -1,0 +1,58 @@
+[project]
+name = "Lagents"
+version = "0.1.0"
+description = "Leon's agents."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "ruff",
+    "pyright",
+    "strictyaml",
+    "click",
+    "docker",
+    "loguru",
+    "requests",
+    "textual>=8.2.7",
+	"datasets",
+    "pydantic",
+    "fastapi",
+    "uvicorn",
+    "litellm>=1.90.2",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+#[project.scripts]
+#coder = "LLLM.coder:coder_cli"
+# 
+# [tool.uv]
+# package = true
+
+[dependency-groups]
+build = ["pyright", "ruff"]
+dev =  ["pytest-cov", "pytest", "pytest-dependency", "httpx"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "strict"
+# suppresses errors for libraries that do not ship complete type stubs.
+reportPrivateImportUsage = false
+
+[tool.ruff]
+exclude = ["tests"]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--cov=Lagents",
+    "-s",
+    "--log-cli-level=INFO"
+]
+markers = [
+    "slow: tests that download remote models or run long evaluations",
+]
+
+[tool.setuptools]
+packages = ["Lagents"]

@@ -1,0 +1,18 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.4  # Ruff version.
+    hooks:
+      - id: ruff-check # Run the linter.
+        args: [ --fix ]
+      - id: ruff-format  # Run the formatter.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.27.2
+    hooks:
+      - id: gitleaks
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    # uv version.
+    rev: 0.8.0
+    hooks:
+      # Update the uv lockfile
+      - id: uv-lock
+      - id: uv-export
