@@ -9,15 +9,15 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
-from ..Lagents.agent import Agent
-from ..Lagents.agent_context import AgentResult
-from ..Lagents.agent_llm import LlmClient
-from ..Lagents.eval_gaia import GaiaTask, GaiaToolName, evaluate_gaia_agent
-from ..Lagents.tool_compute import compute_tool
-#from ..Lagents.tool_common import Tool
-#from ..Lagents.tool_wiki import wiki_tools
-#from ..Lagents.sentence_transformer import SentenceTransformerEmbedder
-#from ..Lagents.vector_db import DEFAULT_EMBEDDING_MODEL
+from ..agent_from_scratch.agent import Agent
+from ..agent_from_scratch.agent_context import AgentResult
+from ..agent_from_scratch.agent_llm import LlmClient
+from ..agent_from_scratch.eval_gaia import GaiaTask, GaiaToolName, evaluate_gaia_agent
+from ..agent_from_scratch.tool_compute import compute_tool
+#from ..agent_from_scratch.tool_common import Tool
+#from ..agent_from_scratch.tool_wiki import wiki_tools
+#from ..agent_from_scratch.sentence_transformer import SentenceTransformerEmbedder
+#from ..agent_from_scratch.vector_db import DEFAULT_EMBEDDING_MODEL
 
 # DEBUG
 import litellm 
@@ -38,6 +38,7 @@ GAIA_COMPUTE_WIKIPEDIA_TRACE_PATH = Path(
 )
 
 qwen3_06b_server_url = "http://localhost:8000"
+api_key = "lllm-test-key"
 
 # TODO find a solution for embedding model in this repo.
 # def _wiki_tools() -> list[Tool]:
@@ -51,6 +52,7 @@ def qwen3_06b_gaia_agent() -> Agent:
         LlmClient(
             "lllm",
             base_url=qwen3_06b_server_url,
+            api_key=api_key,
             max_tokens=4096,
             temperature=0.6,
             top_p=0.95,
@@ -110,5 +112,4 @@ def test_functional_qwen3_06b_gaia_compute_wikipedia_validation(
     assert math.isfinite(evaluation.overall_accuracy)
     assert 0.0 <= evaluation.overall_accuracy <= 1.0
     assert all(result.error is None for result in evaluation.results)
-
 
