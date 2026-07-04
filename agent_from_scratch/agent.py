@@ -215,6 +215,7 @@ class Agent:
         execution_context = context if context is not None else ExecutionContext()
         execution_context.current_step = 0
         execution_context.final_result = None
+        execution_context.state.pop("agent_error", None)
 
         if execution_context.task_state is None:
             execution_context.task_state = TaskState(original_request=prompt)
@@ -230,6 +231,8 @@ class Agent:
                 container_env=container_env,
                 trace_enabled=trace_enabled,
             )
+            if "agent_error" in execution_context.state:
+                break
 
             # Check if the last event is a final response
             if execution_context.events:
@@ -241,8 +244,11 @@ class Agent:
         if execution_context.current_step >= self.max_step:
             logger.warning("reached max_step, return final_result=None")
 
+        error = execution_context.state.get("agent_error")
         return AgentResult(
-            output=execution_context.final_result, context=execution_context
+            output=execution_context.final_result,
+            context=execution_context,
+            status="error" if isinstance(error, str) else "complete",
         )
 
     def _is_final_response(self, event: Event) -> bool:
@@ -317,6 +323,11 @@ class Agent:
             ),
         )
         context.add_event(response_event)
+
+        if response.error_message is not None:
+            context.state["agent_error"] = response.error_message
+            context.increment_step()
+            return None
 
         tool_calls = [item for item in response_content if isinstance(item, ToolCall)]
         if tool_calls:

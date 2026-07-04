@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Literal, cast
 
 import litellm
@@ -192,6 +192,20 @@ class LlmClient:
                         "message": str(error),
                     },
                 }
+                parse_error_detail = _upstream_parse_error_detail(error)
+                if parse_error_detail is not None:
+                    parse_error = parse_error_detail.get("parse_error")
+                    if isinstance(parse_error, Mapping):
+                        typed_parse_error = cast(Mapping[object, object], parse_error)
+                        trace["parse_error"] = {
+                            str(key): value for key, value in typed_parse_error.items()
+                        }
+                    server_trace = parse_error_detail.get("trace")
+                    if isinstance(server_trace, Mapping):
+                        typed_server_trace = cast(Mapping[object, object], server_trace)
+                        trace["server_trace"] = {
+                            str(key): value for key, value in typed_server_trace.items()
+                        }
             return LlmResponse(error_message=str(error), trace=trace)
 
     def count_tokens(self, request: LlmRequest) -> int:
@@ -363,6 +377,50 @@ def _format_tool_result(result: AgentToolResult) -> str:
     if content:
         return f"{prefix_by_status[result.status]}: {content}"
     return f"{prefix_by_status[result.status]}:"
+
+
+def _upstream_parse_error_detail(error: Exception) -> Mapping[str, object] | None:
+    """Recover LLLM's structured parse error from a LiteLLM HTTP exception."""
+    candidates: list[object] = [getattr(error, "body", None)]
+    response = getattr(error, "response", None)
+    if response is not None:
+        candidates.append(response)
+        response_json = getattr(response, "json", None)
+        if callable(response_json):
+            try:
+                candidates.append(cast(Callable[[], object], response_json)())
+            except Exception:
+                pass
+    candidates.extend(error.args)
+    for candidate in candidates:
+        detail = _find_parse_error_detail(candidate)
+        if detail is not None:
+            return detail
+    return None
+
+
+def _find_parse_error_detail(value: object) -> Mapping[str, object] | None:
+    if isinstance(value, Mapping):
+        mapping = cast(Mapping[object, object], value)
+        parse_error = mapping.get("parse_error")
+        if isinstance(parse_error, Mapping):
+            return {str(key): item for key, item in mapping.items()}
+        for item in mapping.values():
+            found = _find_parse_error_detail(item)
+            if found is not None:
+                return found
+    elif isinstance(value, list | tuple):
+        for item in cast(Sequence[object], value):
+            found = _find_parse_error_detail(item)
+            if found is not None:
+                return found
+    elif isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        return _find_parse_error_detail(decoded)
+    return None
 
 
 def _structured_json_payload(content: str, raw_completion: str) -> str:

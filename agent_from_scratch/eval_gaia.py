@@ -13,26 +13,19 @@ Gaia level-1 with Qwen3-06B got ~ 1/10 without any tool.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, fields, is_dataclass
-from datetime import datetime, timezone
-from hashlib import sha256
+from dataclasses import dataclass
 import importlib
 import json
-import os
 from pathlib import Path
 import random
 import re
-import string
-import tempfile
 import time
-from typing import Annotated, Any, Literal, cast
+from typing import Any, Literal, cast
 
 import click
 from loguru import logger
 from pydantic import (
     AliasChoices,
-    BaseModel,
-    ConfigDict,
     Field,
     NonNegativeInt,
     PositiveInt,
@@ -41,12 +34,23 @@ from pydantic import (
 )
 
 from .agent import Agent, AgentMode
-from .agent_llm import LlmClient
 from .agent_context import AgentResult, ExecutionContext
 from .container_env import ContainerEnv, DEFAULT_CONTAINER_ENV_IMAGE
-from .tool_common import Tool
-from .tool_compute import compute_tool
-from .tool_python import python_tool
+from .eval_common import (
+    ModelConfig,
+    StrictModel,
+    ToolsConfig,
+    atomic_write_json as _atomic_write_json,
+    build_llm,
+    build_tools,
+    environment_credential,
+    json_safe as _json_safe,
+    normalize_tools_config,
+    resolved_config,
+    trace_document,
+    utc_now,
+    validate_prompt_template,
+)
 from .yaml_parser import YamlParser, YamlParserError
 
 load_dataset = cast(
@@ -660,27 +664,6 @@ def _execution_context_to_json(context: ExecutionContext) -> dict[str, object]:
     return cast(dict[str, object], _json_safe(context))
 
 
-def _json_safe(value: object) -> object:
-    if value is None or isinstance(value, str | int | float | bool):
-        return value
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, BaseModel):
-        return _json_safe(value.model_dump(mode="json"))
-    if is_dataclass(value) and not isinstance(value, type):
-        return {
-            field.name: _json_safe(getattr(value, field.name))
-            for field in fields(value)
-        }
-    if isinstance(value, Mapping):
-        value = cast(Mapping[str, Any], value)
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
-        value = cast(Sequence[Any], value)
-        return [_json_safe(item) for item in value]
-    return str(value)
-
-
 DEFAULT_PROMPT_TEMPLATE = """Answer this GAIA benchmark question.
 Use the available tools when useful. Return only the final answer in the form:
 FINAL ANSWER: <answer>
@@ -689,33 +672,10 @@ Question: {question}
 {attachment}"""
 
 
-class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-
 class EvaluationConfig(StrictModel):
     """Reserved run-level settings."""
 
     name: str = "gaia"
-
-
-class ModelConfig(StrictModel):
-    model: str
-    base_url: str | None = None
-    max_tokens: PositiveInt = 1024
-    temperature: Annotated[float, Field(ge=0.0)] = 0.0
-    top_p: Annotated[float, Field(gt=0.0, le=1.0)] | None = None
-    top_k: PositiveInt | None = None
-    enable_thinking: bool | None = None
-    extra_body: dict[str, object] = Field(default_factory=dict)
-    timeout: Annotated[float, Field(gt=0.0)] = 3600.0
-
-    @field_validator("model")
-    @classmethod
-    def model_not_empty(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("must not be empty")
-        return value
 
 
 class AgentConfig(StrictModel):
@@ -730,52 +690,18 @@ class AgentConfig(StrictModel):
     @field_validator("prompt_template")
     @classmethod
     def valid_prompt_template(cls, value: str) -> str:
-        allowed = {
-            "question",
-            "attachment",
-            "attachment_path",
-            "file_name",
-            "task_id",
-            "level",
-        }
-        template_fields: set[str] = set()
-        try:
-            for _, field_name, format_spec, conversion in string.Formatter().parse(
-                value
-            ):
-                if field_name is None:
-                    continue
-                if field_name not in allowed:
-                    raise ValueError(
-                        f"unknown placeholder {{{field_name}}}; "
-                        f"supported placeholders: {', '.join(sorted(allowed))}"
-                    )
-                if format_spec or conversion:
-                    raise ValueError(
-                        "format specifications and conversions are unsupported"
-                    )
-                template_fields.add(field_name)
-        except ValueError as error:
-            raise ValueError(f"invalid prompt template: {error}") from error
-        if "question" not in template_fields:
-            raise ValueError("prompt template must contain {question}")
-        return value
-
-
-RuntimeToolName = Literal["compute", "python"]
-
-
-class ToolsConfig(StrictModel):
-    enabled: list[RuntimeToolName] = Field(
-        default_factory=lambda: cast(list[RuntimeToolName], [])
-    )
-
-    @field_validator("enabled")
-    @classmethod
-    def unique_tools(cls, value: list[RuntimeToolName]) -> list[RuntimeToolName]:
-        if len(value) != len(set(value)):
-            raise ValueError("tool names must be unique")
-        return value
+        return validate_prompt_template(
+            value,
+            allowed_fields={
+                "question",
+                "attachment",
+                "attachment_path",
+                "file_name",
+                "task_id",
+                "level",
+            },
+            required_fields={"question"},
+        )
 
 
 class ContainerConfig(StrictModel):
@@ -823,15 +749,7 @@ class AppConfig(StrictModel):
     @field_validator("tools", mode="before")
     @classmethod
     def normalize_tools(cls, value: object) -> object:
-        if isinstance(value, list):
-            return {"enabled": cast(list[object], value)}
-        return value
-
-
-TOOL_REGISTRY: Mapping[RuntimeToolName, Callable[[], Tool]] = {
-    "compute": compute_tool,
-    "python": python_tool,
-}
+        return normalize_tools_config(value)
 
 
 def load_config(path: Path) -> AppConfig:
@@ -844,27 +762,6 @@ def load_config(path: Path) -> AppConfig:
             update={"dataset": config.dataset.model_copy(update={"data_dir": resolved})}
         )
     return config
-
-
-def build_tools(config: ToolsConfig) -> list[Tool]:
-    """Build tools in the configured order."""
-    return [TOOL_REGISTRY[name]() for name in config.enabled]
-
-
-def build_llm(config: ModelConfig, api_key: str | None) -> LlmClient:
-    """Build the configured LiteLLM client."""
-    return LlmClient(
-        config.model,
-        base_url=config.base_url,
-        api_key=api_key,
-        max_tokens=config.max_tokens,
-        temperature=config.temperature,
-        top_p=config.top_p,
-        top_k=config.top_k,
-        enable_thinking=config.enable_thinking,
-        extra_body=config.extra_body,
-        timeout=config.timeout,
-    )
 
 
 def _prompt_for_task(template: str, task: GaiaTask, attachment_path: str | None) -> str:
@@ -887,39 +784,6 @@ def _container_attachment(task: GaiaTask) -> tuple[list[Path], str | None]:
     return [task.file_path.parent], f"/tmp/0/{task.file_path.name}"
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _resolved_config(config: AppConfig) -> dict[str, object]:
-    return cast(dict[str, object], config.model_dump(mode="json"))
-
-
-def _config_hash(config: Mapping[str, object]) -> str:
-    canonical = json.dumps(config, sort_keys=True, separators=(",", ":"))
-    return sha256(canonical.encode()).hexdigest()
-
-
-def _atomic_write_json(path: Path, document: Mapping[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temp_name = tempfile.mkstemp(
-        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(document, handle, ensure_ascii=False, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temp_name, path)
-    except BaseException:
-        try:
-            os.unlink(temp_name)
-        except FileNotFoundError:
-            pass
-        raise
-
-
 def _trace_document(
     *,
     resolved: Mapping[str, object],
@@ -927,32 +791,24 @@ def _trace_document(
     entries: Sequence[Mapping[str, object]],
     evaluation: GaiaEvaluationResult,
 ) -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "configuration": {
-            "resolved": dict(resolved),
-            "sha256": _config_hash(resolved),
-            "credential": {
-                "source": "LLLM_API_KEY",
-                "present": bool(os.environ.get("LLLM_API_KEY")),
-            },
-        },
-        "run": dict(run),
-        "summary": {
+    return trace_document(
+        resolved=resolved,
+        run=run,
+        summary={
             "total_tasks": evaluation.total_tasks,
             "scored_tasks": evaluation.scored_tasks,
             "correct_tasks": evaluation.correct_tasks,
             "overall_accuracy": evaluation.overall_accuracy,
             "per_level_accuracy": evaluation.per_level_accuracy,
         },
-        "entries": list(entries),
-    }
+        entries=entries,
+    )
 
 
 def run_evaluation(config: AppConfig, trace_path: Path) -> GaiaEvaluationResult:
     """Execute a configured run and checkpoint its trace after each task."""
-    resolved = _resolved_config(config)
-    llm = build_llm(config.model, os.environ.get("LLLM_API_KEY") or None)
+    resolved = resolved_config(config)
+    llm = build_llm(config.model, environment_credential())
     agent = Agent(
         llm,
         build_tools(config.tools),
@@ -973,7 +829,7 @@ def run_evaluation(config: AppConfig, trace_path: Path) -> GaiaEvaluationResult:
     )
     run: dict[str, object] = {
         "dataset_id": GAIA_DATASET_ID,
-        "started_at": _now(),
+        "started_at": utc_now(),
         "finished_at": None,
         "selected_task_ids": [task.task_id for task in tasks],
     }
@@ -999,11 +855,21 @@ def run_evaluation(config: AppConfig, trace_path: Path) -> GaiaEvaluationResult:
                 config.agent.prompt_template, task, attachment_path
             )
             output = agent.run(prompt, container_env=container, trace_enabled=True)
-            prediction = (
-                output.output if isinstance(output.output, str) else str(output.output)
-            )
             context = output.context
             status = output.status
+            if output.status == "error":
+                agent_error = output.context.state.get("agent_error")
+                error = (
+                    str(agent_error)
+                    if agent_error is not None
+                    else "agent execution failed"
+                )
+            elif output.output is not None:
+                prediction = (
+                    output.output
+                    if isinstance(output.output, str)
+                    else str(output.output)
+                )
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             status = "error"
@@ -1050,7 +916,7 @@ def run_evaluation(config: AppConfig, trace_path: Path) -> GaiaEvaluationResult:
         )
 
     evaluation = _build_evaluation_result(results)
-    run["finished_at"] = _now()
+    run["finished_at"] = utc_now()
     _atomic_write_json(
         trace_path,
         _trace_document(

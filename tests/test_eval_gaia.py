@@ -681,3 +681,50 @@ def test_application_container_closes_when_agent_fails(
     )
     assert closed == [True]
     assert result.results[0].error == "RuntimeError: model failed"
+
+
+def test_application_trace_preserves_agent_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    task = GaiaTask("task-1", "Q", 1, None, None, {}, "A")
+    monkeypatch.setattr(eval_gaia, "load_gaia_tasks", lambda **kwargs: [task])
+    parse_error = {
+        "type": "ValueError",
+        "message": "bad tool call",
+        "raw_completion": "<tool_call>bad</tool_call>",
+    }
+
+    class ErrorAgent:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def run(self, prompt: str, **kwargs: object) -> AgentResult:
+            context = ExecutionContext(state={"agent_error": "bad tool call"})
+            context.add_event(
+                Event(
+                    execution_id=context.execution_id,
+                    author="agent",
+                    content=[],
+                    metadata={"llm": {"parse_error": parse_error}},
+                )
+            )
+            return AgentResult(output=None, context=context, status="error")
+
+    monkeypatch.setattr(eval_gaia, "Agent", ErrorAgent)
+    config = _application_config(tmp_path).model_copy(
+        update={"tools": eval_gaia.ToolsConfig(enabled=[])}
+    )
+    trace_path = tmp_path / "trace.json"
+
+    result = eval_gaia.run_evaluation(config, trace_path)
+
+    trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    assert result.results[0].error == "bad tool call"
+    assert trace["entries"][0]["result"]["error"] == "bad tool call"
+    assert (
+        trace["entries"][0]["agent"]["context"]["events"][0]["metadata"]["llm"][
+            "parse_error"
+        ]
+        == parse_error
+    )

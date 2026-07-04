@@ -17,6 +17,20 @@ class FakeCompletion:
         return self.response
 
 
+class FakeErrorResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+
+    def json(self) -> dict[str, object]:
+        return self.payload
+
+
+class FakeUpstreamError(Exception):
+    def __init__(self, payload: dict[str, object]) -> None:
+        super().__init__("LLLM returned status 422")
+        self.response = FakeErrorResponse(payload)
+
+
 def completion_response(
     *,
     content: str | None = "answer",
@@ -220,9 +234,7 @@ def test_llm_client_returns_litellm_errors(
 ) -> None:
     _ = install_completion(monkeypatch, ValueError("invalid"))
 
-    response = LlmClient("openai/test").complete(
-        LlmRequest(trace_enabled=True)
-    )
+    response = LlmClient("openai/test").complete(LlmRequest(trace_enabled=True))
 
     assert response.error_message == "invalid"
     assert response.trace is not None
@@ -230,6 +242,39 @@ def test_llm_client_returns_litellm_errors(
         "type": "ValueError",
         "message": "invalid",
     }
+
+
+def test_llm_client_preserves_upstream_completion_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parse_error = {
+        "type": "ValueError",
+        "message": "bad tool call",
+        "raw_completion": "<tool_call>bad</tool_call>",
+    }
+    server_trace = {
+        "raw_completion": "<tool_call>bad</tool_call>",
+        "parse_error": parse_error,
+    }
+    _ = install_completion(
+        monkeypatch,
+        FakeUpstreamError(
+            {
+                "detail": {
+                    "type": "completion_parse_error",
+                    "parse_error": parse_error,
+                    "trace": server_trace,
+                }
+            }
+        ),
+    )
+
+    response = LlmClient("openai/test").complete(LlmRequest(trace_enabled=True))
+
+    assert response.error_message == "LLLM returned status 422"
+    assert response.trace is not None
+    assert response.trace["parse_error"] == parse_error
+    assert response.trace["server_trace"] == server_trace
 
 
 def test_llm_client_counts_tokens_with_litellm(

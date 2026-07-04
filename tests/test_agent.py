@@ -68,9 +68,7 @@ class FakeGenerator(str):
         messages = kwargs["messages"]
         assert isinstance(messages, list)
         typed_messages = [
-            dict(message)
-            for message in messages
-            if isinstance(message, dict)
+            dict(message) for message in messages if isinstance(message, dict)
         ]
         tools = kwargs.get("tools")
         response_format = kwargs.get("response_format")
@@ -239,6 +237,20 @@ def test_agent_run_returns_simple_answer_and_updates_context() -> None:
     assert_task_state_message(generator.messages[0][2], "question")
     assert generator.response_formats == [None]
     assert context.events[0].metadata == {}
+
+
+def test_agent_preserves_llm_error_context_instead_of_returning_final_answer() -> None:
+    context = ExecutionContext()
+    agent = Agent(LlmClient(FakeGenerator([ValueError("bad tool call")])), [])
+
+    result = agent.run("question", context=context, trace_enabled=True)
+
+    assert result.status == "error"
+    assert result.output is None
+    assert context.final_result is None
+    assert context.state["agent_error"] == "bad tool call"
+    assert context.events[-1].content == []
+    assert context.events[-1].metadata["llm"]["error"]["message"] == "bad tool call"
 
 
 def test_agent_trace_enabled_records_llm_and_tool_metadata() -> None:
@@ -442,7 +454,9 @@ def test_agent_feeds_unknown_tool_and_exceptions_back_for_recovery(
     }
 
 
-def test_agent_returns_without_final_result_when_tool_round_limit_is_exhausted() -> None:
+def test_agent_returns_without_final_result_when_tool_round_limit_is_exhausted() -> (
+    None
+):
     generator = FakeGenerator(
         [
             AssistantOutput("", (ToolCall(name="again", arguments={}),)),
@@ -667,7 +681,9 @@ def test_agent_summarizes_middle_history_only_in_llm_request() -> None:
     assert context.items() == [*raw_items, Message(role="assistant", content="done")]
 
 
-def test_agent_summarization_preserves_task_state_and_summarizes_history_after_it() -> None:
+def test_agent_summarization_preserves_task_state_and_summarizes_history_after_it() -> (
+    None
+):
     context = long_message_context()
     context.task_state = TaskState(original_request="root task")
     generator = FakeGenerator(

@@ -26,7 +26,8 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
-evaluate_gaia = "agent_from_scratch.eval_gaia:main"
+eval_gaia = "agent_from_scratch.eval_gaia:main"
+eval_swebench = "agent_from_scratch.eval_swebench:swebench_main"
 # 
 # [tool.uv]
 # package = true
