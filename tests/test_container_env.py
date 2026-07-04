@@ -3,7 +3,7 @@ from typing import cast
 
 import pytest
 
-from ..LLLM.container_env import (
+from agent_from_scratch.container_env import (
     DEFAULT_CONTAINER_ENV_IMAGE,
     ContainerEnv,
 )

@@ -1,6 +1,6 @@
 from loguru import logger
 
-from ..LLLM.agent_context import (
+from agent_from_scratch.agent_context import (
     Event,
     ExecutionContext,
     Message,
@@ -8,7 +8,7 @@ from ..LLLM.agent_context import (
     TaskState,
     UpdateTaskState,
 )
-from ..LLLM.tool_common import ToolCall
+from agent_from_scratch.tool_common import ToolCall
 
 
 def test_execution_context_records_and_flattens_events() -> None:

@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from ..LLLM import eval_swebench
-from ..LLLM.eval_swebench import (
+from agent_from_scratch import eval_swebench
+from agent_from_scratch.eval_swebench import (
     CommandResult,
     SwebenchAgent,
     SwebenchResult,

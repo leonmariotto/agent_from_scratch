@@ -7,12 +7,12 @@ build:
 	uv build
 
 pyright:
-	PYRIGHT_PYTHON_CACHE_DIR=.pyright-python uv run pyright LLLM
+	PYRIGHT_PYTHON_CACHE_DIR=.pyright-python uv run pyright agent_from_scratch
 
 format:
 	uv run ruff format
 
 pytest:
-	uv run pytest -vv -m "not slow"
+	uv run pytest -vv
 
 .PHONY: all ruff format pyright build pytest

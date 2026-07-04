@@ -45,14 +45,9 @@ reportPrivateImportUsage = false
 exclude = ["tests"]
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 addopts = [
     "--cov=agent_from_scratch",
-    "-s",
-    "--log-cli-level=INFO"
 ]
-markers = [
-    "slow: tests that download remote models or run long evaluations",
-]
-
 [tool.setuptools]
 packages = ["agent_from_scratch"]

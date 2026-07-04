@@ -7,9 +7,9 @@ from typing import Any
 
 import pytest
 
-from ..LLLM import eval_gaia
-from ..LLLM.agent_context import AgentResult, Event, ExecutionContext, Message
-from ..LLLM.eval_gaia import (
+from agent_from_scratch import eval_gaia
+from agent_from_scratch.agent_context import AgentResult, Event, ExecutionContext, Message
+from agent_from_scratch.eval_gaia import (
     GaiaTask,
     evaluate_gaia_agent,
     export_gaia_predictions,

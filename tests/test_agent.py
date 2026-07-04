@@ -1,11 +1,12 @@
 from collections.abc import Sequence
+from dataclasses import dataclass
 import json
 
 import pytest
 from pydantic import BaseModel
 
-from ..LLLM import agent_llm as agent_llm_module
-from ..LLLM.agent import (
+from agent_from_scratch import agent_llm as agent_llm_module
+from agent_from_scratch.agent import (
     Agent,
     SYSTEM_PROMPT_V1,
     SYSTEM_PROMPT_V2,
@@ -13,7 +14,7 @@ from ..LLLM.agent import (
     SUM_KEEP_RECENTS,
     SUMMARIZE_TOKEN_THRESHOLD,
 )
-from ..LLLM.agent_context import (
+from agent_from_scratch.agent_context import (
     AgentStructuredResponse,
     ExecutionContext,
     Event,
@@ -21,9 +22,14 @@ from ..LLLM.agent_context import (
     AgentToolResult,
     TaskState,
 )
-from ..LLLM.agent_llm import ChatMessage, LlmClient
-from ..LLLM.generator import AssistantOutput
-from ..LLLM.tool_common import Tool, ToolCall, ToolContextPolicy
+from agent_from_scratch.agent_llm import ChatMessage, LlmClient
+from agent_from_scratch.tool_common import Tool, ToolCall, ToolContextPolicy
+
+
+@dataclass(frozen=True)
+class AssistantOutput:
+    content: str
+    tool_calls: tuple[ToolCall, ...] = ()
 
 
 class FakeCompletion:

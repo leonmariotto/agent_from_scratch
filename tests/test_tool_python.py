@@ -3,8 +3,8 @@ import subprocess
 import pytest
 from loguru import logger
 
-from ..LLLM.tool_common import Tool
-from ..LLLM.tool_python import execute_python, python_tool
+from agent_from_scratch.tool_common import Tool
+from agent_from_scratch.tool_python import execute_python, python_tool
 
 
 class FakeContainerEnv:

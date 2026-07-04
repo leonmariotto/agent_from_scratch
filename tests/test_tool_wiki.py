@@ -3,26 +3,23 @@ from typing import Any
 
 import pytest
 import requests
-import torch
 
-from ..LLLM.agent_context import AgentToolResult
-from ..LLLM.tool_common import Tool
-from ..LLLM.tool_wiki import wiki_tools
+from agent_from_scratch.agent_context import AgentToolResult
+from agent_from_scratch.tool_common import Tool
+from agent_from_scratch.tool_wiki import wiki_tools
 
 
 class FakeEmbedder:
-    def embed(self, text: str) -> torch.Tensor:
+    def embed(self, text: str) -> list[float]:
         lowered = text.lower()
-        return torch.tensor(
-            [
-                1.0 if any(word in lowered for word in ("market", "capital")) else 0.0,
-                1.0 if any(word in lowered for word in ("coffee", "café")) else 0.0,
-                1.0 if any(word in lowered for word in ("python", "language")) else 0.0,
-            ]
-        )
+        return [
+            1.0 if any(word in lowered for word in ("market", "capital")) else 0.0,
+            1.0 if any(word in lowered for word in ("coffee", "café")) else 0.0,
+            1.0 if any(word in lowered for word in ("python", "language")) else 0.0,
+        ]
 
-    def embed_batch(self, texts: Sequence[str]) -> torch.Tensor:
-        return torch.stack([self.embed(text) for text in texts])
+    def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
+        return [self.embed(text) for text in texts]
 
 
 class FakeResponse:

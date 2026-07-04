@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 from dataclasses import dataclass
 from collections.abc import Callable
 from pydantic import BaseModel
@@ -11,10 +11,12 @@ if TYPE_CHECKING:
     from .container_env import ContainerEnv
 
 
-ToolExecutor = Callable[
-    [dict[str, object], "ContainerEnv | None"],
-    str,
-]
+class ToolExecutor(Protocol):
+    def __call__(
+        self,
+        arguments: dict[str, object],
+        container_env: "ContainerEnv | None" = None,
+    ) -> str: ...
 
 
 @dataclass(frozen=True)

@@ -3,10 +3,10 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from ..LLLM import agent_llm as agent_llm_module
-from ..LLLM.agent_context import AgentToolResult, Message
-from ..LLLM.agent_llm import LlmClient, LlmRequest, build_messages
-from ..LLLM.tool_common import ToolCall
+from agent_from_scratch import agent_llm as agent_llm_module
+from agent_from_scratch.agent_context import AgentToolResult, Message
+from agent_from_scratch.agent_llm import LlmClient, LlmRequest, build_messages
+from agent_from_scratch.tool_common import ToolCall
 
 
 class FakeCompletion:

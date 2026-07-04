@@ -3,8 +3,8 @@ from collections.abc import Callable
 
 import pytest
 
-from ..LLLM.tool_common import Tool
-from ..LLLM.tool_compute import compute_tool, execute_compute
+from agent_from_scratch.tool_common import Tool
+from agent_from_scratch.tool_compute import compute_tool, execute_compute
 
 
 def test_compute_tool_returns_registered_bc_tool(
